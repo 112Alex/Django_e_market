@@ -1,0 +1,24 @@
+# Web Framework
+django
+djangorestframework
+djangorestframework-simplejwt
+
+# API Documentation
+drf-spectacular
+
+# Database
+psycopg2-binary
+dj-database-url
+
+# WSGI Server
+gunicorn
+
+# Environment variables
+python-dotenv
+
+# Testing
+pytest
+pytest-django
+pytest-cov
+factory-boy
+pytest-factoryboy

@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: emarket_test
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"] # Версии Python, согласно требованиям ТЗ
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Установка pytest и psycopg2-binary для работы с PostgreSQL
+          pip install pytest pytest-cov psycopg2-binary
+
+      - name: Configure Django settings for CI
+        run: |
+          # Создаем временный файл настроек для CI, чтобы указать на базу данных PostgreSQL сервиса
+          echo "SECRET_KEY='django-insecure-ci-key-for-testing-only-please-change-me-in-prod!'" > ci_settings.py
+          echo "DEBUG = False" >> ci_settings.py
+          echo "ALLOWED_HOSTS = ['*']" >> ci_settings.py # Для CI допустимо, но в проде следует ограничить
+          echo "INSTALLED_APPS = [" >> ci_settings.py
+          echo "    'django.contrib.admin'," >> ci_settings.py
+          echo "    'django.contrib.auth'," >> ci_settings.py
+          echo "    'django.contrib.contenttypes'," >> ci_settings.py
+          echo "    'django.contrib.sessions'," >> ci_settings.py
+          echo "    'django.contrib.messages'," >> ci_settings.py
+          echo "    'django.contrib.staticfiles'," >> ci_settings.py
+          echo "    'rest_framework'," >> ci_settings.py
+          echo "    'drf_spectacular'," >> ci_settings.py
+          echo "    'users'," >> ci_settings.py
+          echo "    'products'," >> ci_settings.py
+          echo "    'cart'," >> ci_settings.py
+          echo "    'orders'," >> ci_settings.py
+          echo "]" >> ci_settings.py
+          echo "AUTH_USER_MODEL = 'users.User'" >> ci_settings.py
+          echo "REST_FRAMEWORK = {" >> ci_settings.py
+          echo "    'DEFAULT_AUTHENTICATION_CLASSES': ('rest_framework_simplejwt.authentication.JWTAuthentication',)," >> ci_settings.py
+          echo "    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema'," >> ci_settings.py
+          echo "}" >> ci_settings.py
+          echo "SPECTACULAR_SETTINGS = {" >> ci_settings.py
+          echo "    'TITLE': 'E-Market API CI'," >> ci_settings.py
+          echo "    'DESCRIPTION': 'API documentation for the Django E-Market project in CI'," >> ci_settings.py
+          echo "    'VERSION': '1.0.0'," >> ci_settings.py
+          echo "    'SERVE_INCLUDE_SCHEMA': False," >> ci_settings.py
+          echo "}" >> ci_settings.py
+          echo "SIMPLE_JWT = {" >> ci_settings.py
+          echo "    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5)," >> ci_settings.py
+          echo "    'REFRESH_TOKEN_LIFETIME': timedelta(days=1)," >> ci_settings.py
+          echo "}" >> ci_settings.py
+          echo "DATABASES = {" >> ci_settings.py
+          echo "    'default': {" >> ci_settings.py
+          echo "        'ENGINE': 'django.db.backends.postgresql'," >> ci_settings.py
+          echo "        'NAME': 'emarket_test'," >> ci_settings.py
+          echo "        'USER': 'testuser'," >> ci_settings.py
+          echo "        'PASSWORD': 'testpassword'," >> ci_settings.py
+          echo "        'HOST': 'localhost'," # Подключаемся к сервису PostgreSQL
+          echo "        'PORT': '5432',"
+          echo "    }" >> ci_settings.py
+          echo "}" >> ci_settings.py
+          # Устанавливаем переменную окружения для указания файла настроек
+          echo "DJANGO_SETTINGS_MODULE=ci_settings" >> $GITHUB_ENV
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          # Используем команду pg_isready из образа PostgreSQL, который доступен в PATH
+          until pg_isready -h localhost -p 5432 -U testuser -d emarket_test; do
+            sleep 5
+          done
+          echo "PostgreSQL is ready."
+
+      - name: Run Django migrations
+        env:
+          DJANGO_SETTINGS_MODULE: ci_settings
+          DATABASE_URL: postgres://testuser:testpassword@localhost:5432/emarket_test
+          SECRET_KEY: django-insecure-ci-key-for-testing-only-please-change-me-in-prod!
+        run: python manage.py migrate
+
+      - name: Run tests with pytest
+        env:
+          DJANGO_SETTINGS_MODULE: ci_settings
+          DATABASE_URL: postgres://testuser:testpassword@localhost:5432/emarket_test
+          SECRET_KEY: django-insecure-ci-key-for-testing-only-please-change-me-in-prod!
+        run: |
+          # Запускаем pytest, генерируем JUnit XML отчеты для GitHub Actions и HTML/XML отчеты покрытия
+          pytest --junitxml=report.xml --cov=. --cov-report=xml --cov-report=html
+          # Убедимся, что pytest-cov установлен, если он не был включен в requirements.txt
+
+      - name: Upload pytest test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python-version }}
+          path: report.xml # Путь к файлу с результатами тестов
+        # Этот шаг выполняется всегда, чтобы артефакты были доступны даже при падении тестов
+        if: ${{ always() }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: htmlcov/ # Каталог с HTML-отчетом покрытия
+        if: ${{ always() }}

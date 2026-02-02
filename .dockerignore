@@ -1,0 +1,9 @@
+.git
+.gitignore
+__pycache__
+.env
+.venv
+htmlcov
+.pytest_cache
+*.log
+*.sqlite3
