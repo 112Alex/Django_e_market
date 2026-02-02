@@ -2,6 +2,7 @@ import logging
 from django.db import transaction
 from cart.models import Cart
 from cart.services import CartService
+from products.models import Product
 from .models import Order, OrderItem
 from users.models import User
 
@@ -29,9 +30,11 @@ class OrderService:
             
             # Check stock availability again inside the transaction
             for item in cart.items.all():
-                product_for_update = item.product
+                product_for_update = Product.objects.select_for_update().get(id=item.product.id)
                 if product_for_update.stock < item.quantity:
-                    raise OrderCreationError(f"Not enough stock for {product_for_update.title}. Available: {product_for_update.stock}")
+                    raise OrderCreationError(
+                        f"Not enough stock for {product_for_update.title}. Available: {product_for_update.stock}"
+                    )
                 product_for_update.stock -= item.quantity
                 product_for_update.save()
 

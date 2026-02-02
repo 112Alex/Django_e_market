@@ -7,7 +7,7 @@ djangorestframework-simplejwt
 drf-spectacular
 
 # Database
-psycopg2-binary
+psycopg2
 dj-database-url
 
 # WSGI Server
